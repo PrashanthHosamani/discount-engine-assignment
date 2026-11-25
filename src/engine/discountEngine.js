@@ -7,12 +7,13 @@
  * Data shapes:
  *
  * DiscountRule {
- *   ruleId:    string       — e.g. "RULE-01"
- *   scope:     "brand" | "platform"
- *   appliesTo: string       — e.g. "Natura Casa", "Amazon India"
- *   type:      "percentage" | "flat"
- *   value:     number       — percentage as integer (15 = 15%), flat in rupees
- *   stackable: boolean
+ *   ruleId:       string       — e.g. "RULE-01"
+ *   scope:        "brand" | "platform" | "cart"
+ *   appliesTo:    string       — e.g. "Natura Casa", "Amazon India", "Entire cart"
+ *   type:         "percentage" | "flat"
+ *   value:        number       — percentage as integer/number (15 = 15%), flat in rupees
+ *   stackable:    boolean
+ *   minCartValue: number|null  — minimum cart subtotal required for scope === "cart"
  * }
  *
  * CartItem {
@@ -142,7 +143,7 @@ export function applyDiscounts(item, rules) {
     reasoningParts.push(ruleToReasoning(rule))
   }
 
-  const finalPrice = Math.round(price)
+  const finalPrice = Math.max(0, Math.round(price))
 
   return {
     itemId: item.itemId,
@@ -171,4 +172,55 @@ export function processCart(cartItems, rules) {
  */
 export function cartTotal(results) {
   return results.reduce((sum, r) => sum + r.finalPrice, 0)
+}
+
+/**
+ * Evaluates cart-level rules against the sum of final item prices.
+ * Threshold check is inclusive (subtotal >= minCartValue).
+ * If multiple cart rules qualify, picks the one giving the largest saving.
+ */
+export function evaluateCartOffer(subtotal, rules) {
+  const qualifying = rules.filter(
+    (r) => r.scope === 'cart' && r.minCartValue != null && subtotal >= r.minCartValue
+  )
+
+  if (qualifying.length === 0) {
+    return null
+  }
+
+  const sorted = [...qualifying].sort(
+    (a, b) => calculateDiscountAmount(subtotal, b) - calculateDiscountAmount(subtotal, a)
+  )
+  const winner = sorted[0]
+  const discountAmount = Math.min(subtotal, calculateDiscountAmount(subtotal, winner))
+
+  const offerText = winner.type === 'percentage' ? `${winner.value}% off` : `Rs.${winner.value} off`
+
+  return {
+    ruleId: winner.ruleId,
+    type: winner.type,
+    value: winner.value,
+    minCartValue: winner.minCartValue,
+    discountAmount,
+    skippedRules: sorted.slice(1).map((r) => r.ruleId),
+    label: `Cart offer: ${offerText} — Rs.${discountAmount.toLocaleString('en-IN')} saved`,
+    reasoning: `Rs.${subtotal.toLocaleString('en-IN')} ≥ Rs.${winner.minCartValue.toLocaleString('en-IN')} → ${offerText} entire cart → −Rs.${discountAmount.toLocaleString('en-IN')}`,
+  }
+}
+
+/**
+ * Full cart evaluation: runs item-level rules first, then cart-level rules on the item subtotal.
+ */
+export function evaluateCart(cartItems, rules) {
+  const itemResults = processCart(cartItems, rules)
+  const subtotal = cartTotal(itemResults)
+  const cartOffer = evaluateCartOffer(subtotal, rules)
+  const finalTotal = cartOffer ? subtotal - cartOffer.discountAmount : subtotal
+
+  return {
+    itemResults,
+    subtotal,
+    cartOffer,
+    finalTotal,
+  }
 }

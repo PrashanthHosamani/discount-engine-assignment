@@ -1,87 +1,41 @@
-# Opptra Discount Engine — Base Implementation
+# Opptra Discount Engine
 
-This is the base implementation for the Opptra FDE Intern assignment.
-Fork this repo, complete the tasks in the assignment brief, and submit your GitHub link + Loom.
+Live deployment: **Pending Vercel deploy** *(update with your `*.vercel.app` URL once deployed)*
 
-## Running locally
+## Run Locally
 
-```bash
-npm install
-npm run dev
-```
+1. Install dependencies: `npm install`
+2. *(Optional for Task 2)* Add `GEMINI_API_KEY=your_key` to `.env.local`
+3. Start the app: `npm run dev` (or run `npm test` for unit tests)
 
-Open http://localhost:5173
+Open `http://localhost:5173`, upload `sample-data/rules.csv` and `sample-data/cart.csv`, and click **Calculate Discounts**.
 
-## Deploying
+## What Changed
 
-```bash
-npm run build
-```
+The core calculator in `src/engine/discountEngine.js` stays pure and untouched at the item level. All new input modes adapt into the existing `DiscountRule` and `CartItem` shapes:
 
-Deploy the `dist/` folder to Vercel, Netlify, or any static host.
-The live deployment URL must be in your README before submission.
+| Area | Files | What it does |
+|------|-------|--------------|
+| Cart-level offers | `src/engine/discountEngine.js`, `src/engine/csvParser.js`, `sample-data/rules.csv`, `src/App.jsx` | Adds `cart` scope + `min_cart_value`, evaluates `RULE-04` after item discounts, and renders the cart offer row only when triggered. |
+| Natural-language rules | `api/parse-rule.js`, `src/engine/nlRuleParser.js`, `src/components/RuleInput.jsx` | Parses plain-English rules via Gemini structured JSON (`POST /api/parse-rule`), validates fields client-side, shows a confirmation step, and updates results if already calculated. |
+| PDF cart upload | `src/engine/pdfReader.js`, `src/engine/pdfTableParser.js`, `src/components/CartPdfUploader.jsx`, `sample-data/cart.pdf` | Reads text coordinates via `pdfjs-dist`, extracts `(Product, Brand, Platform, Base Price)`, validates all rows, replaces the cart, and recalculates if already calculated. |
+| UI & offer controls | `src/App.jsx`, `src/components/DataTable.jsx`, `src/components/CsvUploader.jsx` | Shows `Rules That Match` on cart items, `Status` badges (`Max discount`, `Stacked`, `Discount applied`, `No offer`, `Cart offer`), and `Remove` actions on applied offers. |
+| Tests | `tests/discountEngine.test.js` | Covers sample CSV math, inclusive threshold & below-threshold behavior, LLM validation/ambiguity, and real PDF parsing/failure cases. |
 
-## How to use
+## Architecture & Tradeoffs (Plain Language)
 
-1. Upload `sample-data/rules.csv` as the discount rules input
-2. Upload `sample-data/cart.csv` as the cart input
-3. Click **Calculate Discounts**
+- **Why one serverless function instead of a separate Python backend?** The assignment does not need a database or persistent server. Client-side CSV and PDF parsing run directly in the browser, and `api/parse-rule.js` is a single Vercel function whose only job is keeping `GEMINI_API_KEY` out of browser code.
+- **Why inputs stay separate from the engine:** `csvParser.js`, `nlRuleParser.js`, and `pdfTableParser.js` all output plain `DiscountRule` or `CartItem` objects. A new input mode (e.g., JSON or webhook) can be added without modifying `discountEngine.js`.
 
-## Project structure
+## Deliberate Assumptions
 
-```
-src/
-  engine/
-    discountEngine.js   ← pure discount logic (no UI)
-    csvParser.js        ← CSV → typed objects
-  components/
-    CsvUploader.jsx     ← file upload area
-    DataTable.jsx       ← reusable table
-    ErrorBanner.jsx     ← parse error display
-  App.jsx               ← main UI + state
-  main.jsx              ← entry point
+1. **Cart threshold is inclusive (`>=`):** Matches the sample table (`Cart total >= Rs.4,000`). Note that natural-language phrases like *"more than Rs.5,000"* strictly imply `>`, whereas the engine applies `>=`; documented here as a 1-rupee boundary convention.
+2. **Multiple qualifying cart rules:** Evaluated after item-level discounts; if multiple cart rules qualify, the rule yielding the largest rupee saving is applied so checkout shows one clear cart offer.
+3. **All-or-nothing PDF validation:** If any row in an uploaded PDF has missing columns or a non-numeric price (or if the PDF is scanned/image-only with no text), the import is rejected with row-level errors and the existing cart is preserved. Silently skipping bad rows in a pricing checkout would produce a wrong total that looks valid.
+4. **LLM validation & cart mismatch warning:** Gemini output is checked against `scope`, `type`, numeric bounds (`0 < pct <= 100`), and `minCartValue` before reaching the confirmation step. Ambiguous inputs (e.g., *"Give a discount for big orders"*) return a clear prompt to be more specific. If a parsed brand/platform matches no items in the current cart, a non-blocking warning is shown during confirmation.
+5. **PDF column splitting by x-coordinates:** Header `x` positions (`Product`, `Brand`, `Platform`, `Base Price`) define column boundaries so multi-word names like `Natura Casa` and `Amazon India` do not break on spaces.
+6. **Spec numbering note:** The assignment's *How We'll Evaluate This* section refers to NL rules and PDF upload as Tasks 1 and 2, while *What You Need to Build* labels Cart-level offer as Task 1. All three features are implemented.
 
-sample-data/
-  rules.csv             ← sample discount rules
-  cart.csv              ← sample cart items
-```
+## AI Tools Used
 
-## CSV formats
-
-**rules.csv**
-
-| Column     | Type              | Example          |
-|------------|-------------------|------------------|
-| rule_id    | string            | RULE-01          |
-| scope      | brand \| platform | platform         |
-| applies_to | string            | Amazon India     |
-| type       | percentage \| flat| percentage       |
-| value      | number            | 15               |
-| stackable  | true \| false     | false            |
-
-**cart.csv**
-
-| Column     | Type   | Example      |
-|------------|--------|--------------|
-| item_id    | string | ITEM-01      |
-| product    | string | Cushion Cover|
-| brand      | string | Natura Casa  |
-| platform   | string | Amazon India |
-| base_price | number | 1299         |
-
-## Discount logic
-
-- When multiple non-stackable rules match an item, the one giving the **largest saving in rupees** is applied.
-- Rules marked `stackable: true` apply **on top of** the winning non-stackable rule.
-- If no rules match, the base price is returned with a "No offers available" note.
-
-## Expected results for the sample data
-
-| Item    | Base Price | Final Price | Reasoning                              |
-|---------|-----------|-------------|----------------------------------------|
-| ITEM-01 | Rs.1,299  | Rs.1,104    | Platform offer: 15% off (beats Rs.150) |
-| ITEM-02 | Rs.849    | Rs.629      | Brand offer: Rs.150 off + Platform 10% |
-| ITEM-03 | Rs.599    | Rs.509      | Platform offer: 15% off                |
-| ITEM-04 | Rs.2,499  | Rs.2,499    | No offers available                    |
-| ITEM-05 | Rs.449    | Rs.382      | Platform offer: 15% off                |
-| ITEM-06 | Rs.899    | Rs.809      | Platform offer: 10% off                |
+Used Antigravity and Claude for planning, architecture review, and scaffolding the new input adapters, unit tests, and UI wiring, then reviewed and verified all discount math and edge cases via `npm test` and `npm run build`.

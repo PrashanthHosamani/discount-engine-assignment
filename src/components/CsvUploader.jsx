@@ -40,7 +40,19 @@ export default function CsvUploader({ label, description, onLoad, hasData, fileN
         onChange={handleFile}
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-        <span style={{ fontSize: 20 }}>{hasData ? '✅' : '📄'}</span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '4px 7px',
+            borderRadius: 4,
+            background: hasData ? '#d7f0dd' : '#eceef2',
+            color: hasData ? '#1e5c2c' : '#131A48',
+            letterSpacing: '0.05em',
+          }}
+        >
+          CSV
+        </span>
         <div>
           <div style={{ fontWeight: 700, fontSize: 13, color: '#131A48' }}>{label}</div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
