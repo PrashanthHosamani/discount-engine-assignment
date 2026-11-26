@@ -1,4 +1,10 @@
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest']
+const GEMINI_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3-flash-preview',
+  'gemini-3.5-flash',
+]
 
 function endpointFor(model) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
@@ -57,19 +63,26 @@ export default async function handler(req, res) {
     let lastError = 'No Gemini models available.'
 
     for (const model of GEMINI_MODELS) {
-      const response = await fetch(`${endpointFor(model)}?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ role: 'user', parts: [{ text }] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
-            responseSchema: RESPONSE_SCHEMA,
-          },
-        }),
-      })
+      let response
+      try {
+        response = await fetch(`${endpointFor(model)}?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(4000),
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts: [{ text }] }],
+            generationConfig: {
+              temperature: 0,
+              responseMimeType: 'application/json',
+              responseSchema: RESPONSE_SCHEMA,
+            },
+          }),
+        })
+      } catch (err) {
+        lastError = `Request error on ${model}: ${err.message}`
+        continue
+      }
 
       if (!response.ok) {
         const errText = await response.text()
@@ -83,7 +96,8 @@ export default async function handler(req, res) {
       const data = await response.json()
       const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text
       if (!raw) {
-        return res.status(502).json({ error: 'Empty response from Gemini.' })
+        lastError = `Empty response from ${model}.`
+        continue
       }
       return res.status(200).json(JSON.parse(raw))
     }
