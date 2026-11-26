@@ -1,6 +1,7 @@
 # Opptra Discount Engine
 
-Live deployment: https://discount-engine-assignment-lime.vercel.app/
+Live deployment: https://discount-engine-assignment-lime.vercel.app/  
+Walkthrough video: https://drive.google.com/file/d/1uVZxN2sXpwGFjg8F5fY2N6tB0f6r1s0_/view?usp=sharing
 
 ## Run Locally
 
